@@ -10,7 +10,8 @@ use GuzzleHttp\Client;
 class ExampleTest extends DuskTestCase
 {
     protected $key;
-
+    protected $username ='Luisk262';
+    protected $password ='Secop2/CO2';
     /**
      * A basic browser test example.
      *
@@ -210,8 +211,8 @@ EOF;
                 //Login
                 $browser->visit('https://community.secop.gov.co/STS/Users/Login/Index')->type(
                     '#txtUserName',
-                    'Luisk262'
-                )->type('#txtPassword', 'Secop2/CO2')->click('#btnLoginButton')->pause(5000)->visit(
+                    $this->username
+                )->type('#txtPassword', $this->password)->click('#btnLoginButton')->pause(5000)->visit(
                     'https://community.secop.gov.co/Public/Tendering/ContractNoticeManagement/Index'
                 )->pause(1000);
 
