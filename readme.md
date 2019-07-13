@@ -20,7 +20,7 @@ SecopScrap es un script para minería de dados, la información que obtiene este
 
 *	Php 7.1
 *	Composer 1.4 o superior
-*	Requiere estar registrado en el prortal secop https://community.secop.gov.co/STS/Users/Login/Index
+*	Requiere estar registrado en el portal secop https://community.secop.gov.co/STS/Users/Login/Index
 
 ## Instalación:
 
