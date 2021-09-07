@@ -10,8 +10,8 @@ use GuzzleHttp\Client;
 class ExampleTest extends DuskTestCase
 {
     protected $key;
-    protected $username ='Luisk262';
-    protected $password ='Secop2/CO2';
+    protected $username ='USER_NAME';
+    protected $password ='PASSWORD';
     /**
      * A basic browser test example.
      *
