@@ -34,7 +34,7 @@ class Translator extends Translation\Translator
     /**
      * List of custom directories that contain translation files.
      *
-     * @var array
+     * @var string[]
      */
     protected $directories = [];
 
@@ -44,6 +44,16 @@ class Translator extends Translation\Translator
      * @var bool
      */
     protected $initializing = false;
+
+    /**
+     * List of locales aliases.
+     *
+     * @var string[]
+     */
+    protected $aliases = [
+        'me' => 'sr_Latn_ME',
+        'scr' => 'sh',
+    ];
 
     /**
      * Return a singleton instance of Translator.
@@ -138,7 +148,7 @@ class Translator extends Translation\Translator
      */
     public function trans($id, array $parameters = [], $domain = null, $locale = null)
     {
-        if (null === $domain) {
+        if ($domain === null) {
             $domain = 'messages';
         }
 
@@ -155,7 +165,7 @@ class Translator extends Translation\Translator
 
             return $format(
                 ...array_values($parameters),
-                ...array_fill(0, max(0, $count - count($parameters)), null)
+                ...array_fill(0, max(0, $count - \count($parameters)), null)
             );
         }
 
@@ -180,9 +190,10 @@ class Translator extends Translation\Translator
         }
 
         foreach ($this->getDirectories() as $directory) {
-            $directory = rtrim($directory, '\\/');
-            if (file_exists($filename = "$directory/$locale.php")) {
-                $this->messages[$locale] = require $filename;
+            $data = @include sprintf('%s/%s.php', rtrim($directory, '\\/'), $locale);
+
+            if ($data !== false) {
+                $this->messages[$locale] = $data;
                 $this->addResource('array', $this->messages[$locale], $locale);
 
                 return true;
@@ -202,8 +213,10 @@ class Translator extends Translation\Translator
     public function getLocalesFiles($prefix = '')
     {
         $files = [];
+
         foreach ($this->getDirectories() as $directory) {
             $directory = rtrim($directory, '\\/');
+
             foreach (glob("$directory/$prefix*.php") as $file) {
                 $files[] = $file;
             }
@@ -259,7 +272,7 @@ class Translator extends Translation\Translator
         $this->loadMessagesFromFile($locale);
         $this->addResource('array', $messages, $locale);
         $this->messages[$locale] = array_merge(
-            isset($this->messages[$locale]) ? $this->messages[$locale] : [],
+            $this->messages[$locale] ?? [],
             $messages
         );
 
@@ -300,58 +313,49 @@ class Translator extends Translation\Translator
      */
     public function setLocale($locale)
     {
-        $locale = preg_replace_callback('/[-_]([a-z]{2,})/', function ($matches) {
+        $locale = preg_replace_callback('/[-_]([a-z]{2,}|[0-9]{2,})/', function ($matches) {
             // _2-letters or YUE is a region, _3+-letters is a variant
             $upper = strtoupper($matches[1]);
 
-            if ($upper === 'YUE' || $upper === 'ISO' || strlen($upper) < 3) {
+            if ($upper === 'YUE' || $upper === 'ISO' || \strlen($upper) < 3) {
                 return "_$upper";
             }
 
             return '_'.ucfirst($matches[1]);
         }, strtolower($locale));
 
-        if ($this->getLocale() === $locale) {
+        $previousLocale = $this->getLocale();
+
+        if ($previousLocale === $locale && isset($this->messages[$locale])) {
             return true;
         }
 
+        unset(static::$singletons[$previousLocale]);
+
         if ($locale === 'auto') {
-            $completeLocale = setlocale(LC_TIME, 0);
+            $completeLocale = setlocale(LC_TIME, '0');
             $locale = preg_replace('/^([^_.-]+).*$/', '$1', $completeLocale);
             $locales = $this->getAvailableLocales($locale);
 
             $completeLocaleChunks = preg_split('/[_.-]+/', $completeLocale);
+
             $getScore = function ($language) use ($completeLocaleChunks) {
-                $chunks = preg_split('/[_.-]+/', $language);
-                $score = 0;
-                foreach ($completeLocaleChunks as $index => $chunk) {
-                    if (!isset($chunks[$index])) {
-                        $score++;
-
-                        continue;
-                    }
-                    if (strtolower($chunks[$index]) === strtolower($chunk)) {
-                        $score += 10;
-                    }
-                }
-
-                return $score;
+                return static::compareChunkLists($completeLocaleChunks, preg_split('/[_.-]+/', $language));
             };
-            usort($locales, function ($a, $b) use ($getScore) {
-                $a = $getScore($a);
-                $b = $getScore($b);
 
-                if ($a === $b) {
-                    return 0;
-                }
-
-                return $a < $b ? 1 : -1;
+            usort($locales, function ($first, $second) use ($getScore) {
+                return $getScore($second) <=> $getScore($first);
             });
+
             $locale = $locales[0];
         }
 
+        if (isset($this->aliases[$locale])) {
+            $locale = $this->aliases[$locale];
+        }
+
         // If subtag (ex: en_CA) first load the macro (ex: en) to have a fallback
-        if (strpos($locale, '_') !== false &&
+        if (str_contains($locale, '_') &&
             $this->loadMessagesFromFile($macroLocale = preg_replace('/^([^_]+).*$/', '$1', $locale))
         ) {
             parent::setLocale($macroLocale);
@@ -376,5 +380,24 @@ class Translator extends Translation\Translator
         return [
             'locale' => $this->getLocale(),
         ];
+    }
+
+    private static function compareChunkLists($referenceChunks, $chunks)
+    {
+        $score = 0;
+
+        foreach ($referenceChunks as $index => $chunk) {
+            if (!isset($chunks[$index])) {
+                $score++;
+
+                continue;
+            }
+
+            if (strtolower($chunks[$index]) === strtolower($chunk)) {
+                $score += 10;
+            }
+        }
+
+        return $score;
     }
 }

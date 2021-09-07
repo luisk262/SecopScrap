@@ -2,25 +2,25 @@
 
 namespace Illuminate\Cache;
 
-use Closure;
 use ArrayAccess;
-use DateTimeInterface;
 use BadMethodCallException;
-use Illuminate\Support\Carbon;
+use Closure;
+use DateTimeInterface;
 use Illuminate\Cache\Events\CacheHit;
-use Illuminate\Contracts\Cache\Store;
-use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Cache\Events\CacheMissed;
-use Illuminate\Support\Traits\Macroable;
 use Illuminate\Cache\Events\KeyForgotten;
-use Illuminate\Support\InteractsWithTime;
-use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Contracts\Cache\Repository as CacheContract;
+use Illuminate\Contracts\Cache\Store;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\InteractsWithTime;
+use Illuminate\Support\Traits\Macroable;
 
 /**
  * @mixin \Illuminate\Contracts\Cache\Store
  */
-class Repository implements CacheContract, ArrayAccess
+class Repository implements ArrayAccess, CacheContract
 {
     use InteractsWithTime;
     use Macroable {
@@ -85,7 +85,7 @@ class Repository implements CacheContract, ArrayAccess
      * Retrieve an item from the cache by key.
      *
      * @param  string  $key
-     * @param  mixed   $default
+     * @param  mixed  $default
      * @return mixed
      */
     public function get($key, $default = null)
@@ -134,17 +134,13 @@ class Repository implements CacheContract, ArrayAccess
      */
     public function getMultiple($keys, $default = null)
     {
-        if (is_null($default)) {
-            return $this->many($keys);
-        }
+        $defaults = [];
 
         foreach ($keys as $key) {
-            if (! isset($default[$key])) {
-                $default[$key] = null;
-            }
+            $defaults[$key] = $default;
         }
 
-        return $this->many($default);
+        return $this->many($defaults);
     }
 
     /**
@@ -178,7 +174,7 @@ class Repository implements CacheContract, ArrayAccess
      * Retrieve an item from the cache and delete it.
      *
      * @param  string  $key
-     * @param  mixed   $default
+     * @param  mixed  $default
      * @return mixed
      */
     public function pull($key, $default = null)
@@ -192,7 +188,7 @@ class Repository implements CacheContract, ArrayAccess
      * Store an item in the cache.
      *
      * @param  string  $key
-     * @param  mixed   $value
+     * @param  mixed  $value
      * @param  \DateTimeInterface|\DateInterval|int|null  $ttl
      * @return bool
      */
@@ -209,7 +205,7 @@ class Repository implements CacheContract, ArrayAccess
         $seconds = $this->getSeconds($ttl);
 
         if ($seconds <= 0) {
-            return $this->delete($key);
+            return $this->forget($key);
         }
 
         $result = $this->store->put($this->itemKey($key), $value, $seconds);
@@ -283,21 +279,25 @@ class Repository implements CacheContract, ArrayAccess
      */
     public function setMultiple($values, $ttl = null)
     {
-        return $this->putMany($values, $ttl);
+        return $this->putMany(is_array($values) ? $values : iterator_to_array($values), $ttl);
     }
 
     /**
      * Store an item in the cache if the key does not exist.
      *
      * @param  string  $key
-     * @param  mixed   $value
+     * @param  mixed  $value
      * @param  \DateTimeInterface|\DateInterval|int|null  $ttl
      * @return bool
      */
     public function add($key, $value, $ttl = null)
     {
+        $seconds = null;
+
         if ($ttl !== null) {
-            if ($this->getSeconds($ttl) <= 0) {
+            $seconds = $this->getSeconds($ttl);
+
+            if ($seconds <= 0) {
                 return false;
             }
 
@@ -305,8 +305,6 @@ class Repository implements CacheContract, ArrayAccess
             // has a chance to override this logic. Some drivers better support the way
             // this operation should work with a total "atomic" implementation of it.
             if (method_exists($this->store, 'add')) {
-                $seconds = $this->getSeconds($ttl);
-
                 return $this->store->add(
                     $this->itemKey($key), $value, $seconds
                 );
@@ -317,7 +315,7 @@ class Repository implements CacheContract, ArrayAccess
         // so it exists for subsequent requests. Then, we will return true so it is
         // easy to know if the value gets added. Otherwise, we will return false.
         if (is_null($this->get($key))) {
-            return $this->put($key, $value, $ttl);
+            return $this->put($key, $value, $seconds);
         }
 
         return false;
@@ -481,7 +479,7 @@ class Repository implements CacheContract, ArrayAccess
      */
     public function tags($names)
     {
-        if (! method_exists($this->store, 'tags')) {
+        if (! $this->supportsTags()) {
             throw new BadMethodCallException('This cache store does not support tagging.');
         }
 
@@ -506,9 +504,36 @@ class Repository implements CacheContract, ArrayAccess
     }
 
     /**
+     * Calculate the number of seconds for the given TTL.
+     *
+     * @param  \DateTimeInterface|\DateInterval|int  $ttl
+     * @return int
+     */
+    protected function getSeconds($ttl)
+    {
+        $duration = $this->parseDateInterval($ttl);
+
+        if ($duration instanceof DateTimeInterface) {
+            $duration = Carbon::now()->diffInRealSeconds($duration, false);
+        }
+
+        return (int) $duration > 0 ? $duration : 0;
+    }
+
+    /**
+     * Determine if the current store supports tags.
+     *
+     * @return bool
+     */
+    public function supportsTags()
+    {
+        return method_exists($this->store, 'tags');
+    }
+
+    /**
      * Get the default cache time.
      *
-     * @return int
+     * @return int|null
      */
     public function getDefaultCacheTime()
     {
@@ -552,6 +577,16 @@ class Repository implements CacheContract, ArrayAccess
     }
 
     /**
+     * Get the event dispatcher instance.
+     *
+     * @return \Illuminate\Contracts\Events\Dispatcher
+     */
+    public function getEventDispatcher()
+    {
+        return $this->events;
+    }
+
+    /**
      * Set the event dispatcher instance.
      *
      * @param  \Illuminate\Contracts\Events\Dispatcher  $events
@@ -568,6 +603,7 @@ class Repository implements CacheContract, ArrayAccess
      * @param  string  $key
      * @return bool
      */
+    #[\ReturnTypeWillChange]
     public function offsetExists($key)
     {
         return $this->has($key);
@@ -579,6 +615,7 @@ class Repository implements CacheContract, ArrayAccess
      * @param  string  $key
      * @return mixed
      */
+    #[\ReturnTypeWillChange]
     public function offsetGet($key)
     {
         return $this->get($key);
@@ -588,9 +625,10 @@ class Repository implements CacheContract, ArrayAccess
      * Store an item in the cache for the default time.
      *
      * @param  string  $key
-     * @param  mixed   $value
+     * @param  mixed  $value
      * @return void
      */
+    #[\ReturnTypeWillChange]
     public function offsetSet($key, $value)
     {
         $this->put($key, $value, $this->default);
@@ -602,33 +640,17 @@ class Repository implements CacheContract, ArrayAccess
      * @param  string  $key
      * @return void
      */
+    #[\ReturnTypeWillChange]
     public function offsetUnset($key)
     {
         $this->forget($key);
     }
 
     /**
-     * Calculate the number of seconds for the given TTL.
-     *
-     * @param  \DateTimeInterface|\DateInterval|int  $ttl
-     * @return int
-     */
-    protected function getSeconds($ttl)
-    {
-        $duration = $this->parseDateInterval($ttl);
-
-        if ($duration instanceof DateTimeInterface) {
-            $duration = Carbon::now()->diffInRealSeconds($duration, false);
-        }
-
-        return (int) $duration > 0 ? $duration : 0;
-    }
-
-    /**
      * Handle dynamic calls into macros or pass missing methods to the store.
      *
      * @param  string  $method
-     * @param  array   $parameters
+     * @param  array  $parameters
      * @return mixed
      */
     public function __call($method, $parameters)

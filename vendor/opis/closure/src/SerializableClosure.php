@@ -1,6 +1,6 @@
 <?php
 /* ===========================================================================
- * Copyright (c) 2018-2019 Zindex Software
+ * Copyright (c) 2018-2021 Zindex Software
  *
  * Licensed under the MIT License
  * =========================================================================== */
@@ -94,7 +94,7 @@ class SerializableClosure implements Serializable
     public function getReflector()
     {
         if ($this->reflector === null) {
-            $this->reflector = new ReflectionClosure($this->closure, $this->code);
+            $this->reflector = new ReflectionClosure($this->closure);
             $this->code = null;
         }
 
@@ -132,7 +132,7 @@ class SerializableClosure implements Serializable
             if($scope = $reflector->getClosureScopeClass()){
                 $scope = $scope->name;
             }
-        } elseif($reflector->isScopeRequired()) {
+        } else {
             if($scope = $reflector->getClosureScopeClass()){
                 $scope = $scope->name;
             }
@@ -155,8 +155,9 @@ class SerializableClosure implements Serializable
             'self' => $this->reference,
         ));
 
-        if(static::$securityProvider !== null){
-            $ret =  '@' . json_encode(static::$securityProvider->sign($ret));
+        if (static::$securityProvider !== null) {
+            $data = static::$securityProvider->sign($ret);
+            $ret =  '@' . $data['hash'] . '.' . $data['closure'];
         }
 
         if (!--$this->scope->serializations && !--$this->scope->toserialize) {
@@ -193,7 +194,20 @@ class SerializableClosure implements Serializable
                     "Make sure you use a security provider for both serialization and unserialization.");
             }
 
-            $data = json_decode(substr($data, 1), true);
+            if ($data[1] !== '{') {
+                $separator = strpos($data, '.');
+                if ($separator === false) {
+                    throw new SecurityException('Invalid signed closure');
+                }
+                $hash = substr($data, 1, $separator - 1);
+                $closure = substr($data, $separator + 1);
+
+                $data = ['hash' => $hash, 'closure' => $closure];
+
+                unset($hash, $closure);
+            } else {
+                $data = json_decode(substr($data, 1), true);
+            }
 
             if (!is_array($data) || !static::$securityProvider->verify($data)) {
                 throw new SecurityException("Your serialized closure might have been modified and it's unsafe to be unserialized. " .
@@ -203,7 +217,20 @@ class SerializableClosure implements Serializable
 
             $data = $data['closure'];
         } elseif ($data[0] === '@') {
-            $data = json_decode(substr($data, 1), true);
+            if ($data[1] !== '{') {
+                $separator = strpos($data, '.');
+                if ($separator === false) {
+                    throw new SecurityException('Invalid signed closure');
+                }
+                $hash = substr($data, 1, $separator - 1);
+                $closure = substr($data, $separator + 1);
+
+                $data = ['hash' => $hash, 'closure' => $closure];
+
+                unset($hash, $closure);
+            } else {
+                $data = json_decode(substr($data, 1), true);
+            }
 
             if (!is_array($data) || !isset($data['closure']) || !isset($data['hash'])) {
                 throw new SecurityException('Invalid signed closure');
@@ -233,9 +260,7 @@ class SerializableClosure implements Serializable
             $this->code['this'] = null;
         }
 
-        if ($this->code['scope'] !== null || $this->code['this'] !== null) {
-            $this->closure = $this->closure->bindTo($this->code['this'], $this->code['scope']);
-        }
+        $this->closure = $this->closure->bindTo($this->code['this'], $this->code['scope']);
 
         if(!empty($this->code['objects'])){
             foreach ($this->code['objects'] as $item){
@@ -343,8 +368,6 @@ class SerializableClosure implements Serializable
      */
     public static function wrapClosures(&$data, SplObjectStorage $storage = null)
     {
-        static::enterContext();
-
         if($storage === null){
             $storage = static::$context->scope;
         }
@@ -396,6 +419,9 @@ class SerializableClosure implements Serializable
                         continue;
                     }
                     $property->setAccessible(true);
+                    if (PHP_VERSION >= 7.4 && !$property->isInitialized($instance)) {
+                        continue;
+                    }
                     $value = $property->getValue($instance);
                     if(is_array($value) || is_object($value)){
                         static::wrapClosures($value, $storage);
@@ -404,8 +430,6 @@ class SerializableClosure implements Serializable
                 };
             } while($reflection = $reflection->getParentClass());
         }
-
-        static::exitContext();
     }
 
     /**
@@ -459,6 +483,9 @@ class SerializableClosure implements Serializable
                         continue;
                     }
                     $property->setAccessible(true);
+                    if (PHP_VERSION >= 7.4 && !$property->isInitialized($data)) {
+                        continue;
+                    }
                     $value = $property->getValue($data);
                     if(is_array($value) || is_object($value)){
                         static::unwrapClosures($value, $storage);
@@ -467,6 +494,20 @@ class SerializableClosure implements Serializable
                 };
             } while($reflection = $reflection->getParentClass());
         }
+    }
+
+    /**
+     * Creates a new closure from arbitrary code,
+     * emulating create_function, but without using eval
+     *
+     * @param string$args
+     * @param string $code
+     * @return Closure
+     */
+    public static function createClosure($args, $code)
+    {
+        ClosureStream::register();
+        return include(ClosureStream::STREAM_PROTO . '://function(' . $args. '){' . $code . '};');
     }
 
     /**
@@ -526,6 +567,9 @@ class SerializableClosure implements Serializable
                         continue;
                     }
                     $property->setAccessible(true);
+                    if (PHP_VERSION >= 7.4 && !$property->isInitialized($data)) {
+                        continue;
+                    }
                     $item = $property->getValue($data);
                     if ($item instanceof SerializableClosure || ($item instanceof SelfReference && $item->hash === $this->code['self'])) {
                         $this->code['objects'][] = array(
@@ -618,6 +662,9 @@ class SerializableClosure implements Serializable
                         continue;
                     }
                     $property->setAccessible(true);
+                    if (PHP_VERSION >= 7.4 && !$property->isInitialized($instance)) {
+                        continue;
+                    }
                     $value = $property->getValue($instance);
                     if(is_array($value) || is_object($value)){
                         $this->mapByReference($value);

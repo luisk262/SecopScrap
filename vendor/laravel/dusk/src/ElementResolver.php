@@ -3,10 +3,10 @@
 namespace Laravel\Dusk;
 
 use Exception;
-use Illuminate\Support\Str;
-use InvalidArgumentException;
 use Facebook\WebDriver\WebDriverBy;
+use Illuminate\Support\Str;
 use Illuminate\Support\Traits\Macroable;
+use InvalidArgumentException;
 
 class ElementResolver
 {
@@ -77,6 +77,7 @@ class ElementResolver
      *
      * @param  string  $field
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function resolveForTyping($field)
@@ -86,7 +87,7 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, "input[name='{$field}']", "textarea[name='{$field}']",
+            "input[name='{$field}']", "textarea[name='{$field}']", $field,
         ]);
     }
 
@@ -95,6 +96,7 @@ class ElementResolver
      *
      * @param  string  $field
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function resolveForSelection($field)
@@ -104,16 +106,17 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, "select[name='{$field}']",
+            "select[name='{$field}']", $field,
         ]);
     }
 
     /**
      * Resolve all the options with the given value on the select field.
      *
-     * @param string  $field
-     * @param array  $values
+     * @param  string  $field
+     * @param  array  $values
      * @return \Facebook\WebDriver\Remote\RemoteWebElement[]
+     *
      * @throws \Exception
      */
     public function resolveSelectOptions($field, array $values)
@@ -136,7 +139,9 @@ class ElementResolver
      * @param  string  $field
      * @param  string  $value
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
+     * @throws \InvalidArgumentException
      */
     public function resolveForRadioSelection($field, $value = null)
     {
@@ -151,7 +156,7 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, "input[type=radio][name='{$field}'][value='{$value}']",
+            "input[type=radio][name='{$field}'][value='{$value}']", $field,
         ]);
     }
 
@@ -161,6 +166,7 @@ class ElementResolver
      * @param  string|null  $field
      * @param  string  $value
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function resolveForChecking($field, $value = null)
@@ -180,7 +186,7 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, $selector,
+            $selector, $field,
         ]);
     }
 
@@ -189,6 +195,7 @@ class ElementResolver
      *
      * @param  string  $field
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function resolveForAttachment($field)
@@ -198,7 +205,7 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, "input[type=file][name='{$field}']",
+            "input[type=file][name='{$field}']", $field,
         ]);
     }
 
@@ -207,6 +214,7 @@ class ElementResolver
      *
      * @param  string  $field
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function resolveForField($field)
@@ -216,8 +224,8 @@ class ElementResolver
         }
 
         return $this->firstOrFail([
-            $field, "input[name='{$field}']", "textarea[name='{$field}']",
-            "select[name='{$field}']", "button[name='{$field}']",
+            "input[name='{$field}']", "textarea[name='{$field}']",
+            "select[name='{$field}']", "button[name='{$field}']", $field,
         ]);
     }
 
@@ -226,6 +234,8 @@ class ElementResolver
      *
      * @param  string  $button
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
+     * @throws \InvalidArgumentException
      */
     public function resolveForButtonPress($button)
     {
@@ -331,6 +341,7 @@ class ElementResolver
      *
      * @param  array  $selectors
      * @return \Facebook\WebDriver\Remote\RemoteWebElement
+     *
      * @throws \Exception
      */
     public function firstOrFail($selectors)

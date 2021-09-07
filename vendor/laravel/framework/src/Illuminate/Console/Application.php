@@ -3,22 +3,24 @@
 namespace Illuminate\Console;
 
 use Closure;
-use Illuminate\Support\ProcessUtils;
-use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Console\Events\ArtisanStarting;
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Contracts\Console\Application as ApplicationContract;
 use Illuminate\Contracts\Container\Container;
-use Symfony\Component\Console\Input\ArgvInput;
-use Symfony\Component\Console\Input\ArrayInput;
-use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Console\Input\StringInput;
-use Symfony\Component\Process\PhpExecutableFinder;
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Output\ConsoleOutput;
-use Symfony\Component\Console\Output\BufferedOutput;
-use Symfony\Component\Console\Output\OutputInterface;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\ProcessUtils;
 use Symfony\Component\Console\Application as SymfonyApplication;
 use Symfony\Component\Console\Command\Command as SymfonyCommand;
 use Symfony\Component\Console\Exception\CommandNotFoundException;
-use Illuminate\Contracts\Console\Application as ApplicationContract;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Input\StringInput;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Process\PhpExecutableFinder;
 
 class Application extends SymfonyApplication implements ApplicationContract
 {
@@ -67,7 +69,7 @@ class Application extends SymfonyApplication implements ApplicationContract
         $this->setAutoExit(false);
         $this->setCatchExceptions(false);
 
-        $this->events->dispatch(new Events\ArtisanStarting($this));
+        $this->events->dispatch(new ArtisanStarting($this));
 
         $this->bootstrap();
     }
@@ -82,15 +84,15 @@ class Application extends SymfonyApplication implements ApplicationContract
         );
 
         $this->events->dispatch(
-            new Events\CommandStarting(
-                $commandName, $input, $output = $output ?: new ConsoleOutput
+            new CommandStarting(
+                $commandName, $input, $output = $output ?: new BufferedConsoleOutput
             )
         );
 
         $exitCode = parent::run($input, $output);
 
         $this->events->dispatch(
-            new Events\CommandFinished($commandName, $input, $output, $exitCode)
+            new CommandFinished($commandName, $input, $output, $exitCode)
         );
 
         return $exitCode;

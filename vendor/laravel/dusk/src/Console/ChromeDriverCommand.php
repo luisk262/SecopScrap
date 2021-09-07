@@ -2,9 +2,10 @@
 
 namespace Laravel\Dusk\Console;
 
-use ZipArchive;
 use Illuminate\Console\Command;
 use Laravel\Dusk\OperatingSystem;
+use Symfony\Component\Process\Process;
+use ZipArchive;
 
 /**
  * @copyright Originally created by Jonas Staudenmeir: https://github.com/staudenmeir/dusk-updater
@@ -16,7 +17,11 @@ class ChromeDriverCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'dusk:chrome-driver {version?} {--all : Install a ChromeDriver binary for every OS}';
+    protected $signature = 'dusk:chrome-driver {version?}
+                    {--all : Install a ChromeDriver binary for every OS}
+                    {--detect : Detect the installed Chrome / Chromium version}
+                    {--proxy= : The proxy to download the binary through (example: "tcp://127.0.0.1:9000")}
+                    {--ssl-no-verify : Bypass SSL certificate verification when installing through a proxy}';
 
     /**
      * The console command description.
@@ -26,14 +31,14 @@ class ChromeDriverCommand extends Command
     protected $description = 'Install the ChromeDriver binary';
 
     /**
-     * URL to the home page.
+     * URL to the latest stable release version.
      *
      * @var string
      */
-    protected $homeUrl = 'http://chromedriver.chromium.org/home';
+    protected $latestVersionUrl = 'https://chromedriver.storage.googleapis.com/LATEST_RELEASE';
 
     /**
-     * URL to the latest release version.
+     * URL to the latest release version for a major Chrome version.
      *
      * @var string
      */
@@ -54,6 +59,8 @@ class ChromeDriverCommand extends Command
     protected $slugs = [
         'linux' => 'linux64',
         'mac' => 'mac64',
+        'mac-intel' => 'mac64',
+        'mac-arm' => 'mac64_m1',
         'win' => 'win32',
     ];
 
@@ -100,6 +107,32 @@ class ChromeDriverCommand extends Command
     protected $directory = __DIR__.'/../../bin/';
 
     /**
+     * The default commands to detect the installed Chrome / Chromium version.
+     *
+     * @var array
+     */
+    protected $chromeVersionCommands = [
+        'linux' => [
+            '/usr/bin/google-chrome --version',
+            '/usr/bin/chromium-browser --version',
+            '/usr/bin/chromium --version',
+            '/usr/bin/google-chrome-stable --version',
+        ],
+        'mac' => [
+            '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version',
+        ],
+        'mac-intel' => [
+            '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version',
+        ],
+        'mac-arm' => [
+            '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version',
+        ],
+        'win' => [
+            'reg query "HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon" /v version',
+        ],
+    ];
+
+    /**
      * Execute the console command.
      *
      * @return void
@@ -136,6 +169,10 @@ class ChromeDriverCommand extends Command
     {
         $version = $this->argument('version');
 
+        if ($this->option('detect')) {
+            $version = $this->detectChromeVersion(OperatingSystem::id());
+        }
+
         if (! $version) {
             return $this->latestVersion();
         }
@@ -150,7 +187,7 @@ class ChromeDriverCommand extends Command
             return $this->legacyVersions[$version];
         }
 
-        return trim(file_get_contents(
+        return trim($this->getUrl(
             sprintf($this->versionUrl, $version)
         ));
     }
@@ -162,11 +199,49 @@ class ChromeDriverCommand extends Command
      */
     protected function latestVersion()
     {
-        $home = file_get_contents($this->homeUrl);
+        $streamOptions = [];
 
-        preg_match('/Latest stable release:.*?\?path=([\d.]+)/', $home, $matches);
+        if ($this->option('ssl-no-verify')) {
+            $streamOptions = [
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                ],
+            ];
+        }
 
-        return $matches[1];
+        if ($this->option('proxy')) {
+            $streamOptions['http'] = ['proxy' => $this->option('proxy'), 'request_fulluri' => true];
+        }
+
+        return trim(file_get_contents($this->latestVersionUrl, false, stream_context_create($streamOptions)));
+    }
+
+    /**
+     * Detect the installed Chrome / Chromium major version.
+     *
+     * @param  string  $os
+     * @return int|bool
+     */
+    protected function detectChromeVersion($os)
+    {
+        foreach ($this->chromeVersionCommands[$os] as $command) {
+            $process = Process::fromShellCommandline($command);
+
+            $process->run();
+
+            preg_match('/(\d+)(\.\d+){3}/', $process->getOutput(), $matches);
+
+            if (! isset($matches[1])) {
+                continue;
+            }
+
+            return $matches[1];
+        }
+
+        $this->error('Chrome version could not be detected.');
+
+        return false;
     }
 
     /**
@@ -182,7 +257,7 @@ class ChromeDriverCommand extends Command
 
         file_put_contents(
             $archive = $this->directory.'chromedriver.zip',
-            fopen($url, 'r')
+            $this->getUrl($url)
         );
 
         return $archive;
@@ -225,5 +300,28 @@ class ChromeDriverCommand extends Command
         rename($this->directory.$binary, $this->directory.$newName);
 
         chmod($this->directory.$newName, 0755);
+    }
+
+    /**
+     * Get the contents of a URL using the 'proxy' and 'ssl-no-verify' command options.
+     *
+     * @param  string  $url
+     * @return string|bool
+     */
+    protected function getUrl(string $url)
+    {
+        $contextOptions = [];
+
+        if ($this->option('proxy')) {
+            $contextOptions['http'] = ['proxy' => $this->option('proxy'), 'request_fulluri' => true];
+        }
+
+        if ($this->option('ssl-no-verify')) {
+            $contextOptions['ssl'] = ['verify_peer' => false];
+        }
+
+        $streamContext = stream_context_create($contextOptions);
+
+        return file_get_contents($url, false, $streamContext);
     }
 }

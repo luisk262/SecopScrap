@@ -2,8 +2,8 @@
 
 namespace Laravel\Dusk\Chrome;
 
-use RuntimeException;
 use Laravel\Dusk\OperatingSystem;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 
 class ChromeProcess
@@ -20,6 +20,8 @@ class ChromeProcess
      *
      * @param  string  $driver
      * @return void
+     *
+     * @throws \RuntimeException
      */
     public function __construct($driver = null)
     {
@@ -42,13 +44,15 @@ class ChromeProcess
             return $this->process($arguments);
         }
 
-        if ($this->onWindows()) {
-            $this->driver = realpath(__DIR__.'/../../bin/chromedriver-win.exe');
-        } elseif ($this->onMac()) {
-            $this->driver = realpath(__DIR__.'/../../bin/chromedriver-mac');
-        } else {
-            $this->driver = realpath(__DIR__.'/../../bin/chromedriver-linux');
-        }
+        $filenames = [
+            'linux' => 'chromedriver-linux',
+            'mac' => 'chromedriver-mac',
+            'mac-intel' => 'chromedriver-mac-intel',
+            'mac-arm' => 'chromedriver-mac-arm',
+            'win' => 'chromedriver-win.exe',
+        ];
+
+        $this->driver = realpath(__DIR__.'/../../bin').DIRECTORY_SEPARATOR.$filenames[$this->operatingSystemId()];
 
         return $this->process($arguments);
     }
@@ -62,7 +66,7 @@ class ChromeProcess
     protected function process(array $arguments = [])
     {
         return new Process(
-            array_merge([realpath($this->driver)], $arguments), null, $this->chromeEnvironment()
+            array_merge([$this->driver], $arguments), null, $this->chromeEnvironment()
         );
     }
 
@@ -98,5 +102,15 @@ class ChromeProcess
     protected function onMac()
     {
         return OperatingSystem::onMac();
+    }
+
+    /**
+     * Determine OS ID.
+     *
+     * @return string
+     */
+    protected function operatingSystemId()
+    {
+        return OperatingSystem::id();
     }
 }

@@ -2,8 +2,9 @@
 
 namespace Laravel\Dusk\Http\Controllers;
 
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
 
 class UserController
 {
@@ -32,6 +33,7 @@ class UserController
      *
      * @param  string  $userId
      * @param  string  $guard
+     * @return void
      */
     public function login($userId, $guard = null)
     {
@@ -50,10 +52,13 @@ class UserController
      * Log the user out of the application.
      *
      * @param  string  $guard
+     * @return void
      */
     public function logout($guard = null)
     {
         Auth::guard($guard ?: config('auth.defaults.guard'))->logout();
+
+        Session::forget('password_hash_'.$guard ?: config('auth.defaults.guard'));
     }
 
     /**

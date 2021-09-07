@@ -3,6 +3,9 @@
 namespace Laravel\Dusk\Concerns;
 
 use DateTimeInterface;
+use Facebook\WebDriver\Exception\NoSuchCookieException;
+use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Support\Facades\Crypt;
 
 trait InteractsWithCookies
 {
@@ -21,13 +24,23 @@ trait InteractsWithCookies
             return $this->addCookie($name, $value, $expiry, $options);
         }
 
-        if ($cookie = $this->driver->manage()->getCookieNamed($name)) {
-            return decrypt(rawurldecode($cookie['value']), $unserialize = false);
+        try {
+            $cookie = $this->driver->manage()->getCookieNamed($name);
+        } catch (NoSuchCookieException $e) {
+            $cookie = null;
+        }
+
+        if ($cookie) {
+            $decryptedValue = decrypt(rawurldecode($cookie['value']), $unserialize = false);
+
+            $hasValuePrefix = strpos($decryptedValue, CookieValuePrefix::create($name, Crypt::getKey())) === 0;
+
+            return $hasValuePrefix ? CookieValuePrefix::remove($decryptedValue) : $decryptedValue;
         }
     }
 
     /**
-     * Get or set a plain cookie's value.
+     * Get or set an unencrypted cookie's value.
      *
      * @param  string  $name
      * @param  string|null  $value
@@ -41,7 +54,13 @@ trait InteractsWithCookies
             return $this->addCookie($name, $value, $expiry, $options, false);
         }
 
-        if ($cookie = $this->driver->manage()->getCookieNamed($name)) {
+        try {
+            $cookie = $this->driver->manage()->getCookieNamed($name);
+        } catch (NoSuchCookieException $e) {
+            $cookie = null;
+        }
+
+        if ($cookie) {
             return rawurldecode($cookie['value']);
         }
     }
@@ -59,7 +78,9 @@ trait InteractsWithCookies
     public function addCookie($name, $value, $expiry = null, array $options = [], $encrypt = true)
     {
         if ($encrypt) {
-            $value = encrypt($value, $serialize = false);
+            $prefix = CookieValuePrefix::create($name, Crypt::getKey());
+
+            $value = encrypt($prefix.$value, $serialize = false);
         }
 
         if ($expiry instanceof DateTimeInterface) {

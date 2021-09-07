@@ -2,13 +2,14 @@
 
 namespace Laravel\Dusk;
 
-use Closure;
 use BadMethodCallException;
-use Illuminate\Support\Str;
-use Facebook\WebDriver\WebDriverPoint;
-use Illuminate\Support\Traits\Macroable;
-use Facebook\WebDriver\WebDriverDimension;
+use Closure;
 use Facebook\WebDriver\Remote\WebDriverBrowserType;
+use Facebook\WebDriver\WebDriverBy;
+use Facebook\WebDriver\WebDriverDimension;
+use Facebook\WebDriver\WebDriverPoint;
+use Illuminate\Support\Str;
+use Illuminate\Support\Traits\Macroable;
 
 class Browser
 {
@@ -46,6 +47,13 @@ class Browser
     public static $storeConsoleLogAt;
 
     /**
+     * The directory where source code snapshots will be stored.
+     *
+     * @var string
+     */
+    public static $storeSourceAt;
+
+    /**
      * The browsers that support retrieving logs.
      *
      * @var array
@@ -79,7 +87,7 @@ class Browser
     /**
      * The element resolver instance.
      *
-     * @var ElementResolver
+     * @var \Laravel\Dusk\ElementResolver
      */
     public $resolver;
 
@@ -98,10 +106,17 @@ class Browser
     public $component;
 
     /**
+     * Indicates that the browser should be resized to fit the entire "body" before screenshotting failures.
+     *
+     * @var bool
+     */
+    public $fitOnFailure = true;
+
+    /**
      * Create a browser instance.
      *
      * @param  \Facebook\WebDriver\Remote\RemoteWebDriver  $driver
-     * @param  ElementResolver  $resolver
+     * @param  \Laravel\Dusk\ElementResolver  $resolver
      * @return void
      */
     public function __construct($driver, $resolver = null)
@@ -157,6 +172,18 @@ class Browser
     public function visitRoute($route, $parameters = [])
     {
         return $this->visit(route($route, $parameters));
+    }
+
+    /**
+     * Browse to the "about:blank" page.
+     *
+     * @return $this
+     */
+    public function blank()
+    {
+        $this->driver->navigate()->to('about:blank');
+
+        return $this;
     }
 
     /**
@@ -219,6 +246,18 @@ class Browser
     }
 
     /**
+     * Navigate to the next page.
+     *
+     * @return $this
+     */
+    public function forward()
+    {
+        $this->driver->navigate()->forward();
+
+        return $this;
+    }
+
+    /**
      * Maximize the browser window.
      *
      * @return $this
@@ -247,6 +286,48 @@ class Browser
     }
 
     /**
+     * Make the browser window as large as the content.
+     *
+     * @return $this
+     */
+    public function fitContent()
+    {
+        $this->driver->switchTo()->defaultContent();
+
+        $html = $this->driver->findElement(WebDriverBy::tagName('html'));
+
+        if (! empty($html) && $html->getSize()->getWidth() > 0 && $html->getSize()->getHeight() > 0) {
+            $this->resize($html->getSize()->getWidth(), $html->getSize()->getHeight());
+        }
+
+        return $this;
+    }
+
+    /**
+     * Disable fit on failures.
+     *
+     * @return $this
+     */
+    public function disableFitOnFailure()
+    {
+        $this->fitOnFailure = false;
+
+        return $this;
+    }
+
+    /**
+     * Enable fit on failures.
+     *
+     * @return $this
+     */
+    public function enableFitOnFailure()
+    {
+        $this->fitOnFailure = true;
+
+        return $this;
+    }
+
+    /**
      * Move the browser window.
      *
      * @param  int  $x
@@ -263,6 +344,38 @@ class Browser
     }
 
     /**
+     * Scroll element into view at the given selector.
+     *
+     * @param  string  $selector
+     * @return $this
+     */
+    public function scrollIntoView($selector)
+    {
+        $selector = addslashes($this->resolver->format($selector));
+
+        $this->driver->executeScript("document.querySelector(\"$selector\").scrollIntoView();");
+
+        return $this;
+    }
+
+    /**
+     * Scroll screen to element at the given selector.
+     *
+     * @param  string  $selector
+     * @return $this
+     */
+    public function scrollTo($selector)
+    {
+        $this->ensurejQueryIsAvailable();
+
+        $selector = addslashes($this->resolver->format($selector));
+
+        $this->driver->executeScript("jQuery(\"html, body\").animate({scrollTop: jQuery(\"$selector\").offset().top}, 0);");
+
+        return $this;
+    }
+
+    /**
      * Take a screenshot and store it with the given name.
      *
      * @param  string  $name
@@ -270,9 +383,15 @@ class Browser
      */
     public function screenshot($name)
     {
-        $this->driver->takeScreenshot(
-            sprintf('%s/%s.png', rtrim(static::$storeScreenshotsAt, '/'), $name)
-        );
+        $filePath = sprintf('%s/%s.png', rtrim(static::$storeScreenshotsAt, '/'), $name);
+
+        $directoryPath = dirname($filePath);
+
+        if (! is_dir($directoryPath)) {
+            mkdir($directoryPath, 0777, true);
+        }
+
+        $this->driver->takeScreenshot($filePath);
 
         return $this;
     }
@@ -299,6 +418,25 @@ class Browser
     }
 
     /**
+     * Store a snapshot of the page's current source code with the given name.
+     *
+     * @param  string  $name
+     * @return $this
+     */
+    public function storeSource($name)
+    {
+        $source = $this->driver->getPageSource();
+
+        if (! empty($source)) {
+            file_put_contents(
+                sprintf('%s/%s.txt', rtrim(static::$storeSourceAt, '/'), $name), $source
+            );
+        }
+
+        return $this;
+    }
+
+    /**
      * Switch to a specified frame in the browser and execute the given callback.
      *
      * @param  string  $selector
@@ -319,7 +457,7 @@ class Browser
     /**
      * Execute a Closure with a scoped browser instance.
      *
-     * @param  string  $selector
+     * @param  string|\Laravel\Dusk\Component  $selector
      * @param  \Closure  $callback
      * @return $this
      */
@@ -331,7 +469,7 @@ class Browser
     /**
      * Execute a Closure with a scoped browser instance.
      *
-     * @param  string  $selector
+     * @param  string|\Laravel\Dusk\Component  $selector
      * @param  \Closure  $callback
      * @return $this
      */
@@ -352,6 +490,47 @@ class Browser
         call_user_func($callback, $browser);
 
         return $this;
+    }
+
+    /**
+     * Execute a Closure outside of the current browser scope.
+     *
+     * @param  string|\Laravel\Dusk\Component  $selector
+     * @param  \Closure  $callback
+     * @return $this
+     */
+    public function elsewhere($selector, Closure $callback)
+    {
+        $browser = new static(
+            $this->driver, new ElementResolver($this->driver, 'body '.$selector)
+        );
+
+        if ($this->page) {
+            $browser->onWithoutAssert($this->page);
+        }
+
+        if ($selector instanceof Component) {
+            $browser->onComponent($selector, $this->resolver);
+        }
+
+        call_user_func($callback, $browser);
+
+        return $this;
+    }
+
+    /**
+     * Execute a Closure outside of the current browser scope when the selector is available.
+     *
+     * @param  string  $selector
+     * @param  \Closure  $callback
+     * @param  int|null  $seconds
+     * @return $this
+     */
+    public function elsewhereWhenAvailable($selector, Closure $callback, $seconds = null)
+    {
+        return $this->elsewhere('', function ($browser) use ($selector, $callback, $seconds) {
+            $browser->whenAvailable($selector, $callback, $seconds);
+        });
     }
 
     /**
@@ -470,6 +649,8 @@ class Browser
      * @param  string  $method
      * @param  array  $parameters
      * @return mixed
+     *
+     * @throws \BadMethodCallException
      */
     public function __call($method, $parameters)
     {
